@@ -1,0 +1,5 @@
+vault-cli
+vault-cli.exe
+dist/
+*.enc
+*.zip
