@@ -90,8 +90,10 @@ Build with Go 1.26.10 or newer. Before release, run `go test -race ./...`,
 `go vet ./...`, `go mod verify`, and
 `go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...`.
 The fixed Argon2id compatibility vector was captured with the previous dependency
-version and verified unchanged after updating; cipher parameters and production
-code are unchanged. The remaining module-level OpenPGP advisory is not in this
+version and verified unchanged after updating; cipher parameters remain unchanged. ZIP destination checks now compare relative
+paths, so the default output directory (`.`) accepts valid files while parent
+traversal remains rejected. A synthetic encrypted ZIP is recovered through the
+actual CLI in tests; wrong passphrases must leave no output. The remaining module-level OpenPGP advisory is not in this
 application's imported packages (it uses Argon2id, not OpenPGP).
 Cross-compilation does not establish runtime acceptance on Windows or Linux.
 Do not merge, publish binaries or release without maintainer approval.

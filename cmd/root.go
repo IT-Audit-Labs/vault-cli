@@ -165,7 +165,8 @@ func readPassphrase() (string, error) {
 func extractZipFile(f *zip.File, outputDir string) error {
 	// Security: prevent zip slip (path traversal)
 	destPath := filepath.Join(outputDir, f.Name)
-	if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(outputDir)+string(os.PathSeparator)) {
+	relativePath, err := filepath.Rel(outputDir, destPath)
+	if err != nil || !filepath.IsLocal(relativePath) {
 		return fmt.Errorf("illegal file path: %s", f.Name)
 	}
 
