@@ -5,6 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"fmt"
 	"testing"
 
 	"golang.org/x/crypto/argon2"
@@ -122,5 +123,15 @@ func TestDeriveKey_Length(t *testing.T) {
 
 	if len(key) != Argon2idKeyLength {
 		t.Fatalf("expected key length %d, got %d", Argon2idKeyLength, len(key))
+	}
+}
+
+// Pins the export key format across dependency upgrades, not just a round trip
+// where both encryption and decryption could change together.
+func TestDeriveKey_ExportCompatibility(t *testing.T) {
+	got := DeriveKey("local-test-passphrase", []byte("0123456789abcdef"))
+	want := "73ba82699e9ef36a4b93352ed15517191400abc5b2fa420aa1ff204fc6b83091"
+	if fmt.Sprintf("%x", got) != want {
+		t.Fatalf("export key mismatch: %x", got)
 	}
 }

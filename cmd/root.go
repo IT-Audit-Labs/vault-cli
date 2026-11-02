@@ -127,9 +127,15 @@ func runDecrypt() error {
 		return fmt.Errorf("cannot read ZIP: %w", err)
 	}
 
+	root, err := os.OpenRoot(outputDir)
+	if err != nil {
+		return fmt.Errorf("cannot open output directory: %w", err)
+	}
+	defer root.Close()
+
 	extracted := 0
 	for _, f := range reader.File {
-		if err := extractZipFile(f, outputDir); err != nil {
+		if err := extractZipFile(f, root); err != nil {
 			return fmt.Errorf("failed to extract %s: %w", f.Name, err)
 		}
 		extracted++
@@ -162,19 +168,19 @@ func readPassphrase() (string, error) {
 	return strings.TrimRight(string(buf[:n]), "\r\n"), nil
 }
 
-func extractZipFile(f *zip.File, outputDir string) error {
-	// Security: prevent zip slip (path traversal)
-	destPath := filepath.Join(outputDir, f.Name)
-	if !strings.HasPrefix(filepath.Clean(destPath), filepath.Clean(outputDir)+string(os.PathSeparator)) {
+func extractZipFile(f *zip.File, root *os.Root) error {
+	// Reject lexical traversal; rooted operations also prevent symlink escapes.
+	relativePath := filepath.Clean(f.Name)
+	if !filepath.IsLocal(relativePath) {
 		return fmt.Errorf("illegal file path: %s", f.Name)
 	}
 
 	if f.FileInfo().IsDir() {
-		return os.MkdirAll(destPath, 0o755)
+		return root.MkdirAll(relativePath, 0o755)
 	}
 
 	// Create parent dirs
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+	if err := root.MkdirAll(filepath.Dir(relativePath), 0o755); err != nil {
 		return err
 	}
 
@@ -184,7 +190,7 @@ func extractZipFile(f *zip.File, outputDir string) error {
 	}
 	defer rc.Close()
 
-	out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode()|0o600)
+	out, err := root.OpenFile(relativePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode().Perm()|0o600)
 	if err != nil {
 		return err
 	}
