@@ -47,7 +47,7 @@ func TestExtractZipFileDestination(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Chdir(t.TempDir())
-			err := extractZipFile(zipEntry(t, tc.entry), tc.output)
+			err := extractZipFile(zipEntry(t, tc.entry), extractionRoot(t, tc.output))
 			if tc.reject {
 				if err == nil {
 					t.Fatal("expected path rejection")
@@ -144,5 +144,121 @@ func TestCLIRecovery(t *testing.T) {
 				t.Fatalf("wrong recovered contents: %q", recovered)
 			}
 		})
+	}
+}
+
+func TestExtractZipFileRejectsSymlinkEscape(t *testing.T) {
+	for _, kind := range []string{"directory", "file"} {
+		t.Run(kind, func(t *testing.T) {
+			output := t.TempDir()
+			outside := t.TempDir()
+			victim := filepath.Join(outside, "item.txt")
+			if err := os.WriteFile(victim, []byte("must remain unchanged"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			target, link, entry := outside, filepath.Join(output, "nested"), "nested/item.txt"
+			if kind == "file" {
+				target, link, entry = victim, filepath.Join(output, "linked.txt"), "linked.txt"
+			}
+			if err := os.Symlink(target, link); err != nil {
+				t.Skipf("symlink unavailable: %v", err)
+			}
+			if err := extractZipFile(zipEntry(t, entry), extractionRoot(t, output)); err == nil {
+				t.Error("symlink escape accepted")
+			}
+			got, err := os.ReadFile(victim)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != "must remain unchanged" {
+				t.Error("outside file was overwritten")
+			}
+		})
+	}
+}
+
+func extractionRoot(t *testing.T, path string) *os.Root {
+	t.Helper()
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { root.Close() })
+	return root
+}
+
+func TestExtractZipFileAllowsInternalSymlink(t *testing.T) {
+	output := t.TempDir()
+	if err := os.Mkdir(filepath.Join(output, "actual"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("actual", filepath.Join(output, "alias")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if err := extractZipFile(zipEntry(t, "alias/item.txt"), extractionRoot(t, output)); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(output, "actual/item.txt"))
+	if err != nil || string(data) != "local recovery fixture" {
+		t.Fatalf("internal symlink recovery failed: %v", err)
+	}
+}
+
+func TestExtractZipDirectoryRejectsSymlinkEscape(t *testing.T) {
+	output, outside := t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(output, "nested")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	entry := zipEntry(t, "unused")
+	entry.Name = "nested/newdir/"
+	if err := extractZipFile(entry, extractionRoot(t, output)); err == nil {
+		t.Fatal("directory symlink escape accepted")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "newdir")); !os.IsNotExist(err) {
+		t.Fatal("outside directory created")
+	}
+}
+
+func TestExtractZipFilePreservesOrdinaryOverwriteAndMetadata(t *testing.T) {
+	output := t.TempDir()
+	dest := filepath.Join(output, "item.txt")
+	if err := os.WriteFile(dest, []byte("old contents"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	entry := zipEntry(t, "item.txt")
+	entry.SetMode(os.ModeSymlink | 0755)
+	if err := extractZipFile(entry, extractionRoot(t, output)); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatal("archive metadata created a non-regular file")
+	}
+	data, err := os.ReadFile(dest)
+	if err != nil || string(data) != "local recovery fixture" {
+		t.Fatalf("overwrite failed: %v", err)
+	}
+}
+
+func TestExtractZipFileRejectsAbsoluteInternalSymlink(t *testing.T) {
+	output := t.TempDir()
+	inside := filepath.Join(output, "actual")
+	if err := os.Mkdir(inside, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(inside, filepath.Join(output, "alias")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if err := extractZipFile(zipEntry(t, "alias/item.txt"), extractionRoot(t, output)); err == nil {
+		t.Fatal("absolute symlink accepted")
+	}
+	if _, err := os.Stat(filepath.Join(inside, "item.txt")); !os.IsNotExist(err) {
+		t.Fatal("file created through absolute symlink")
 	}
 }
